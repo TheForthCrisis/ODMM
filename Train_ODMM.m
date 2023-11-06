@@ -2,22 +2,22 @@ function model = Train_ODMM(Xlist, y, lambda, theta, mu, tau, rho, varargin)
 %% Initialization
 qp_options = optimoptions('quadprog', 'Display', 'none');
 [xdim, ydim, m]=size(Xlist);  % Size of matrix, number of samples
-S0 = rand(xdim, ydim);  % init val
-Lam0 = rand(xdim, ydim);  % init val
+S0 = rand(xdim, ydim);  % initial value of S
+Lam0 = rand(xdim, ydim);  % initial value of Lam
 
 parser=inputParser;
 addRequired(parser, 'Xlist', @(x) length(size(Xlist))==3);
 addRequired(parser, 'y', @(x) size(y,2)==size(Xlist, 3));
 addRequired(parser, 'lambda', @(x) x>0);
-addRequired(parser, 'theta', @(x) x>0 && x<1);  % Theta
-addRequired(parser, 'mu', @(x) x>0 && x<=1);  % 分类正确的惩罚系数
-addRequired(parser, 'rho', @(x) x>=0);  % 惩罚项系数
-addRequired(parser, 'tau', @(x) x>=0);  % 核范数项系数
-addOptional(parser, 'eta', 0.999, @(x) x>0 && x<1);  % 加速所需的下降条件
+addRequired(parser, 'theta', @(x) x>0 && x<1);  % hyperparameter
+addRequired(parser, 'mu', @(x) x>0 && x<=1);  % hyperparameter
+addRequired(parser, 'rho', @(x) x>=0);  % hyperparameter
+addRequired(parser, 'tau', @(x) x>=0);  % hyperparameter
+addOptional(parser, 'eta', 0.999, @(x) x>0 && x<1);
 addParameter(parser, 'S', S0);
 addParameter(parser, 'Lam', Lam0);
 addParameter(parser, 'iter', 100, @(x) x>0);
-addParameter(parser, 'InfoOutput', 0)  % =0关闭终端输出 =1只显示迭代次数 =2 还输出残差曲线
+addParameter(parser, 'InfoOutput', 0)  % 0: no info; 1: iteration; 2: residual curve
 addParameter(parser, 'Tolorance', 1e-6, @(x) x>0);
 parse(parser, Xlist, y, lambda, theta, mu, tau, rho, varargin{:});
 
@@ -33,9 +33,9 @@ info_flag = parser.Results.InfoOutput;
 %% Solving
 t = 1; t_new = 1;
 residual_list = zeros(1, iter);
-restart_flag = false(1, iter);  % 是否重启
+restart_flag = false(1, iter);
 
-% 计算辅助变量
+% Calculate auxiliary variables
 X_vec = reshape(Xlist, [xdim*ydim, m])';
 Xy_vec = X_vec.*y';
 Q = Xy_vec*Xy_vec';
@@ -44,11 +44,11 @@ H = [Q + 0.5*m*(1+rho)*(1-theta)^2/lambda * eye(m, m), -Q;
     -Q, Q + 0.5*m*(1+rho)*(1-theta)^2/lambda/mu * eye(m, m)];
 
 for k=1:iter
-    % 计算辅助变量
+    % Calculate auxiliary variables
     temp = Lam_hat + rho * S_hat;
     u = y.*(X_vec*temp(:))';
     q = [(1+rho)*(theta-1) * ones(1, m) + u, (1+rho)*(theta+1) * ones(1, m) - u];
-    % 求解W
+    % Solve W
     alpha=quadprog(H, q, [], [], [], [], zeros(1, 2*m), [], [], qp_options);
     
     v = y'.*(alpha(1:m) - alpha(m+1:2*m));
@@ -57,7 +57,7 @@ for k=1:iter
 
     xi = 0.5*m*(1-theta)^2/lambda * alpha(1:m);
     epsilon = 0.5*m*(1-theta)^2/lambda/mu * alpha(m+1:2*m);
-    % 求解b
+    % Solve b
     b = 0;
     flag_xi = xi > 0;
     flag_eps = epsilon > 0;
@@ -68,13 +68,13 @@ for k=1:iter
         b = b + sum(flag_eps.*(y'.*(1+theta+epsilon) - X_vec*W(:)))/sum(flag_eps);
     end
 
-    % 求解S
+    % Solve S
     S = svt(rho * W - Lam_hat, tau) / rho;
-    % 更新对偶变量
+    % Update multiplier
     Lam = Lam_hat - rho * (W - S);
-    % 更新残差
+    % Update residual
     residual_list(k) = sum((Lam - Lam_hat).^2, 'all') / rho + rho * sum((S - S_hat).^2, 'all');
-    % 加速与重启
+    % Accelerate or restart
     if k == 1 || residual_list(k) < eta * residual_list(k-1)
         t_new = (1+sqrt(1+4*t^2))/2;
         S_hat = S + (t - 1)/t_new * (S - S_old);
@@ -90,7 +90,7 @@ for k=1:iter
     S_old = S;
     Lam_old = Lam;
     
-    % 迭代次数显示
+    % Iteration
     if info_flag >= 1
         fprintf('epoch -- %d/%d', k, iter)
         if restart_flag(k)
@@ -105,7 +105,7 @@ for k=1:iter
     end
 end
 
-%% 输出内容
+%% Outputs
 model.W = W;
 model.b = b;
 
